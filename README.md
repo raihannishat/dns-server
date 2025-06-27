@@ -80,9 +80,10 @@ network:
         - 192.168.56.117/24
 ```
 
-### Netplan অ্যাপ্লাই:
+### Netplan try and apply:
 
 ```bash
+sudo netplan try
 sudo netplan apply
 ```
 
