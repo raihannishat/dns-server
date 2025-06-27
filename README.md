@@ -1,21 +1,46 @@
-# Ubuntu 24.04 DNS Master-Slave সার্ভার কনফিগারেশন (BIND9)
+# DNS সার্ভার পূর্ণ কনফিগারেশন ও ডকুমেন্টেশন
 
-এই ডকুমেন্টে একটি Master ও দুইটি Slave DNS সার্ভার কনফিগারেশন step-by-step দেখানো হয়েছে Ubuntu 24.04.2 LTS ভার্সনে। সার্ভারগুলো VirtualBox-এ VM হিসেবে রান করে।
+## ✅ ভূমিকা: DNS কি, কেন দরকার?
 
-## সার্ভার ডিটেইলস
+### DNS (Domain Name System) কী?
 
-| VM Name | IP Address     | Hostname       | ভূমিকা     |
-| ------- | -------------- | -------------- | ---------- |
-| vm-1    | 192.168.56.115 | ns1.raihan.dns | Master DNS |
-| vm-2    | 192.168.56.116 | ns2.raihan.dns | Slave DNS  |
-| vm-3    | 192.168.56.117 | ns3.raihan.dns | Slave DNS  |
+DNS হলো একটি সিস্টেম যা ডোমেইন নাম (যেমন: `www.google.com`) কে IP ঠিকানায় (যেমন: `142.250.190.68`) রূপান্তর করে।
+
+### কেন দরকার?
+
+- ব্যবহারকারীরা সহজে নাম দিয়ে ওয়েবসাইট অ্যাক্সেস করতে পারে।
+- সিস্টেম ও নেটওয়ার্কে নামভিত্তিক কমিউনিকেশন সম্ভব হয়।
+- DNS ছাড়া আপনাকে সব জায়গায় IP মনে রাখতে হতো।
+
+### কোথায় দরকার?
+
+- স্থানীয় LAN নেটওয়ার্কে
+- ইন্টারনাল সার্ভিস রেজল্যুশনের জন্য
+- ইন্টারনেটে ওয়েবসাইট হোস্টিংয়ের সময়
+
+### কাদের জন্য দরকার?
+
+- সিস্টেম অ্যাডমিন
+- নেটওয়ার্ক ইঞ্জিনিয়ার
+- ওয়েব অ্যাপ্লিকেশন ও সার্ভার ডেভেলপার
 
 ---
 
-## Step 1: Netplan Configuration (Master + Slaves)
+## ✅ সার্ভার প্ল্যান
+
+| VM   | Hostname       | IP             | ভূমিকা     |
+| ---- | -------------- | -------------- | ---------- |
+| vm-1 | ns1-raihan-dns | 192.168.56.115 | Master DNS |
+| vm-2 | ns2-raihan-dns | 192.168.56.116 | Slave DNS  |
+| vm-3 | ns3-raihan-dns | 192.168.56.117 | Slave DNS  |
+
+---
+
+## ✅ Netplan কনফিগারেশন
+
+### Master: `/etc/netplan/50-cloud-init.yaml`
 
 ```yaml
-# /etc/netplan/50-cloud-init.yaml
 network:
   version: 2
   ethernets:
@@ -27,8 +52,35 @@ network:
         - 192.168.56.115/24
 ```
 
-- Slave VM-গুলোর জন্য IP অনুযায়ী `addresses` পরিবর্তন করুন।
-- Command:
+### Slave (ns2): `/etc/netplan/50-cloud-init.yaml`
+
+```yaml
+network:
+  version: 2
+  ethernets:
+    enp0s3:
+      dhcp4: true
+    enp0s8:
+      dhcp4: false
+      addresses:
+        - 192.168.56.116/24
+```
+
+### Slave (ns3): `/etc/netplan/50-cloud-init.yaml`
+
+```yaml
+network:
+  version: 2
+  ethernets:
+    enp0s3:
+      dhcp4: true
+    enp0s8:
+      dhcp4: false
+      addresses:
+        - 192.168.56.117/24
+```
+
+### Netplan অ্যাপ্লাই:
 
 ```bash
 sudo netplan apply
@@ -36,99 +88,137 @@ sudo netplan apply
 
 ---
 
-## Step 2: BIND9 ইনস্টল করুন (সব VM-এ)
+## ✅ DNS সার্ভার সফটওয়্যার ইনস্টল
 
 ```bash
 sudo apt update
-sudo apt install bind9 bind9utils bind9-doc dnsutils -y
+sudo apt install bind9 bind9utils bind9-doc dnsutils
 ```
 
 ---
 
-## Step 3: Master DNS Configuration (ns1)
+## ✅ Master DNS কনফিগারেশন ফাইলসমূহ
 
-### 3.1 `named.conf.options`:
+### `/etc/bind/named.conf.options`
 
 ```conf
 options {
     directory "/var/cache/bind";
-
     allow-transfer { 192.168.56.116; 192.168.56.117; };
     allow-query { any; };
     recursion no;
-
     dnssec-validation auto;
     listen-on { any; };
     allow-recursion { none; };
 };
 ```
 
-### 3.2 জোন ফাইল ডিক্লারেশন (named.conf.local):
+**উদ্দেশ্য ব্যাখ্যা:**
+
+- `allow-transfer`: Slave সার্ভারকে zone transfer অনুমতি
+- `recursion no`: Master authoritative server, নিজের DNS resolve করবে না
+
+### `/etc/bind/named.conf.local`
 
 ```conf
-zone "raihan.dns" IN {
+zone "raihan.dns" {
     type master;
     file "/etc/bind/zones/db.raihan.dns";
     allow-transfer { 192.168.56.116; 192.168.56.117; };
 };
 
-zone "56.168.192.in-addr.arpa" IN {
+zone "56.168.192.in-addr.arpa" {
     type master;
     file "/etc/bind/zones/db.192";
     allow-transfer { 192.168.56.116; 192.168.56.117; };
 };
 ```
 
-### 3.3 জোন ফাইল তৈরি করুন:
+### জোন ফাইল: `/etc/bind/zones/db.raihan.dns`
+
+```dns
+$TTL    604800
+@       IN      SOA     ns1.raihan.dns. root.raihan.dns. (
+                             2         ; Serial
+                        604800         ; Refresh
+                         86400         ; Retry
+                       2419200         ; Expire
+                        604800 )       ; Negative Cache TTL
+;
+@       IN      NS      ns1.raihan.dns.
+@       IN      NS      ns2.raihan.dns.
+@       IN      NS      ns3.raihan.dns.
+ns1     IN      A       192.168.56.115
+ns2     IN      A       192.168.56.116
+ns3     IN      A       192.168.56.117
+www     IN      A       192.168.56.115
+```
+
+### রিভার্স জোন: `/etc/bind/zones/db.192`
+
+```dns
+$TTL    604800
+@       IN      SOA     ns1.raihan.dns. root.raihan.dns. (
+                             1         ; Serial
+                        604800         ; Refresh
+                         86400         ; Retry
+                       2419200         ; Expire
+                        604800 )       ; Negative Cache TTL
+;
+@       IN      NS      ns1.raihan.dns.
+@       IN      NS      ns2.raihan.dns.
+@       IN      NS      ns3.raihan.dns.
+115     IN      PTR     ns1.raihan.dns.
+116     IN      PTR     ns2.raihan.dns.
+117     IN      PTR     ns3.raihan.dns.
+```
+
+---
+
+## ✅ Slave DNS: ns2 এবং ns3
+
+### `/etc/bind/named.conf.local`
+
+```conf
+zone "raihan.dns" {
+    type slave;
+    masters { 192.168.56.115; };
+    file "/var/cache/bind/db.raihan.dns";
+};
+
+zone "56.168.192.in-addr.arpa" {
+    type slave;
+    masters { 192.168.56.115; };
+    file "/var/cache/bind/db.192";
+};
+```
+
+### `/etc/bind/named.conf.options`
+
+```conf
+options {
+    directory "/var/cache/bind";
+    allow-query { any; };
+    recursion no;
+    dnssec-validation auto;
+    listen-on { any; };
+    allow-recursion { none; };
+};
+```
+
+---
+
+## ✅ resolvectl ব্যবহার করে DNS কনফিগার (যদি resolv.conf ম্যানুয়ালি না করা হয়)
 
 ```bash
-sudo mkdir -p /etc/bind/zones
-sudo cp /etc/bind/db.local /etc/bind/zones/db.raihan.dns
-sudo cp /etc/bind/db.127 /etc/bind/zones/db.192
+sudo resolvectl dns enp0s8 192.168.56.115 192.168.56.116 192.168.56.117
+sudo resolvectl domain enp0s8 ~raihan.dns
+resolvectl status
 ```
 
-### 3.4 জোন ফাইল এডিট (Forward & Reverse)
+---
 
-**db.raihan.dns** (A Records):
-
-```dns
-@   IN  SOA ns1.raihan.dns. admin.raihan.dns. (
-            1 ; Serial
-            604800 ; Refresh
-            86400 ; Retry
-            2419200 ; Expire
-            604800 ) ; Negative Cache TTL
-;
-@   IN  NS      ns1.raihan.dns.
-@   IN  NS      ns2.raihan.dns.
-@   IN  NS      ns3.raihan.dns.
-
-ns1 IN  A       192.168.56.115
-ns2 IN  A       192.168.56.116
-ns3 IN  A       192.168.56.117
-www IN  A       192.168.56.115
-```
-
-**db.192** (PTR Records):
-
-```dns
-@   IN  SOA ns1.raihan.dns. admin.raihan.dns. (
-            1 ; Serial
-            604800 ; Refresh
-            86400 ; Retry
-            2419200 ; Expire
-            604800 ) ; Negative Cache TTL
-;
-@   IN  NS      ns1.raihan.dns.
-@   IN  NS      ns2.raihan.dns.
-@   IN  NS      ns3.raihan.dns.
-
-115 IN PTR ns1.raihan.dns.
-116 IN PTR ns2.raihan.dns.
-117 IN PTR ns3.raihan.dns.
-```
-
-### 3.5 BIND config check ও রিস্টার্ট
+## ✅ কনফিগারেশন টেস্ট ও সার্ভার রিস্টার্ট
 
 ```bash
 sudo named-checkconf
@@ -139,89 +229,25 @@ sudo systemctl restart bind9
 
 ---
 
-## Step 4: Slave Configuration (ns2, ns3)
+## ✅ Master vs Slave পার্থক্য
 
-### 4.1 named.conf.local:
-
-```conf
-zone "raihan.dns" IN {
-    type slave;
-    masters { 192.168.56.115; };
-    file "/var/cache/bind/db.raihan.dns";
-};
-
-zone "56.168.192.in-addr.arpa" IN {
-    type slave;
-    masters { 192.168.56.115; };
-    file "/var/cache/bind/db.192";
-};
-```
-
-### 4.2 `named.conf.options` (স্লেভ সার্ভারের জন্য):
-
-```conf
-options {
-    directory "/var/cache/bind";
-
-    allow-query { any; };
-    recursion no;
-
-    dnssec-validation auto;
-    listen-on { any; };
-    allow-recursion { none; };
-};
-```
-
-### 4.3 BIND রিস্টার্ট করুন:
-
-```bash
-sudo systemctl restart bind9
-```
+| দিক    | Master                  | Slave                      |
+| ------ | ----------------------- | -------------------------- |
+| Type   | master                  | slave                      |
+| File   | নিজে zone ফাইল ধরে রাখে | master থেকে ট্রান্সফার করে |
+| Update | নিজে authoritative      | শুধু read-only copy রাখে   |
 
 ---
 
-## Step 5: resolv.conf স্থায়ীভাবে কনফিগার করা (যদি systemd-resolved ব্যবহৃত হয় না)
-
-```bash
-sudo systemctl disable systemd-resolved
-sudo systemctl stop systemd-resolved
-sudo rm /etc/resolv.conf
-sudo nano /etc/resolv.conf
-```
-
-ফাইলের মধ্যে লিখুন:
-
-```
-nameserver 192.168.56.115
-nameserver 192.168.56.116
-nameserver 192.168.56.117
-```
-
-**অপশনাল:** ফাইল লক করে দিন যাতে আর পরিবর্তিত না হয়:
-
-```bash
-sudo chattr +i /etc/resolv.conf
-```
-
----
-
-## Step 6: DNS সার্ভার টেস্ট করুন
-
-### 6.1 A রেকর্ড টেস্ট:
+## ✅ টেস্টিং (dig দিয়ে)
 
 ```bash
 dig @192.168.56.115 www.raihan.dns
 dig @192.168.56.116 www.raihan.dns
-dig @192.168.56.117 www.raihan.dns
-```
-
-### 6.2 PTR রেকর্ড টেস্ট:
-
-```bash
 dig -x 192.168.56.115
 ```
 
-### 6.3 AXFR (Zone Transfer) টেস্ট:
+## ✅ zone transfer টেস্ট:
 
 ```bash
 dig @192.168.56.116 raihan.dns AXFR
@@ -229,6 +255,6 @@ dig @192.168.56.116 raihan.dns AXFR
 
 ---
 
-## সম্পন্ন ✅
+## ✅ শেষ কথা:
 
-আপনার DNS সার্ভার Master-Slave রেপ্লিকেশন সহ সম্পূর্ণভাবে কনফিগারড। এখন যেকোনো ক্লায়েন্ট VM এই DNS সার্ভার ব্যবহার করে নাম রেজলভ করতে পারবে।
+এই ডকুমেন্ট অনুসরণ করে আপনি একটি প্রোডাকশন-রেডি Master-Slave DNS ইনফ্রাস্ট্রাকচার তৈরি করেছেন, সম্পূর্ণ standard ও secure উপায়ে। আপনি চাইলে পরবর্তী ধাপে DHCP, Load Balancing, অথবা External DNS integration করতে পারেন।
