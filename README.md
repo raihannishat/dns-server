@@ -255,6 +255,21 @@ sudo systemctl restart bind9
 sudo systemctl status bind9
 ```
 
+DNS সার্ভার সঠিকভাবে কাজ করার জন্য, ফায়ারওয়ালে TCP এবং UDP পোর্ট ৫৩ অবশ্যই খোলা থাকতে হবে (সব সার্ভারের জন্য):
+
+```bash
+sudo firewall-cmd --add-port=53/tcp --permanent
+sudo firewall-cmd --add-port=53/udp --permanent
+sudo firewall-cmd --reload
+
+sudo iptables -L -n | grep 53
+sudo iptables -A INPUT -p tcp --dport 53 -j ACCEPT
+sudo iptables -A INPUT -p udp --dport 53 -j ACCEPT
+sudo iptables-save
+
+sudo firewall-cmd --list-all
+```
+
 ---
 
 ## ✅ DNS টেস্টিং
